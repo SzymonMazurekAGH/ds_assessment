@@ -1,0 +1,8 @@
+__pycache__/
+embeddings/
+hf_temp_dir/
+lightning_logs/
+models/
+output/
+results/
+*.log
