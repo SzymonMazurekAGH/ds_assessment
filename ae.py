@@ -29,6 +29,7 @@ class AE(LightningModule):
         enc_out_dim: int = 512,
         latent_dim: int = 256,
         lr: float = 1e-4,
+        grayscale: bool = False,
         **kwargs,
     ):
         """
@@ -76,8 +77,14 @@ class AE(LightningModule):
             )
 
         self.fc = nn.Linear(self.enc_out_dim, self.latent_dim)
-        # self.encoder.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        # self.decoder.conv1 = torch.nn.Conv2d(64, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        if grayscale:
+            self.encoder.conv1 = torch.nn.Conv2d(
+                1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+            )
+            self.decoder.conv1 = torch.nn.Conv2d(
+                64, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+            )
+
     @staticmethod
     def pretrained_weights_available():
         return list(AE.pretrained_urls.keys())
