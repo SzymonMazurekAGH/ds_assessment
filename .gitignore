@@ -6,3 +6,6 @@ models/
 output/
 results/
 *.log
+wandb/
+data/
+checkpoints/
