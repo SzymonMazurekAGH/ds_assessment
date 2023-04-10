@@ -9,3 +9,5 @@ results/
 wandb/
 data/
 checkpoints/
+*.yml
+csv*/

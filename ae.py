@@ -122,14 +122,21 @@ class AE(LightningModule):
         self.log_dict(
             {f"train_{k}": v for k, v in logs.items()},
             on_step=True,
-            on_epoch=False,
+            on_epoch=True,
             sync_dist=True,
+            prog_bar=True,
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, logs = self.step(batch, batch_idx)
-        self.log_dict({f"val_{k}": v for k, v in logs.items()}, sync_dist=True)
+        self.log_dict(
+            {f"val_{k}": v for k, v in logs.items()},
+            sync_dist=True,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
         return loss
 
     def configure_optimizers(self):

@@ -21,13 +21,12 @@ pl.seed_everything(42)
 def train(
     train_dataset, val_dataset, batch_size, epochs, model, checkpoint_path, exp_name
 ) -> None:
-    wandb_logger = WandbLogger(
-        name=exp_name, project="dataset_assessment", log_model=True
-    )
+    # wandb_logger =
+    print(f"Evaluating {exp_name}")
     early_stop_callback = EarlyStopping(
         monitor="val_loss",
-        min_delta=0.00,
-        patience=10,
+        min_delta=0.001,
+        patience=3,
         verbose=False,
         mode="min",
     )
@@ -64,7 +63,7 @@ def train(
         precision=16,
         log_every_n_steps=1,
         max_epochs=epochs,
-        logger=wandb_logger,
+        logger=WandbLogger(name=exp_name, project="dataset_assessment", log_model=True),
         callbacks=[early_stop_callback, checkpoint_callback],
         strategy=DDPStrategy(find_unused_parameters=False),
     )
@@ -161,12 +160,12 @@ if __name__ == "__main__":
     TRAIN = args.train
     EMBED = args.embed
     INFERENCE = args.inference
+    GRAYSCALE = args.grayscale
+    BATCH_SIZE = args.batch_size
+    IMAGE_SIZE = args.image_size
     DS_NAME = args.ds_name
     LATENT_DIM = args.latent_dim
     AE_SCALING_FACTOR = args.ae_scaling_factor
-    BATCH_SIZE = args.batch_size
-    GRAYSCALE = args.grayscale
-    IMAGE_SIZE = args.image_size
     EXPERIMENT_NAME = f"ae_{AE_SCALING_FACTOR}_{DS_NAME}_{LATENT_DIM}"
     CHECKPOINT_FOLDER = args.checkpoint_folder_path
     CHECKPOINT_PATH = os.path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.ckpt")
@@ -180,6 +179,7 @@ if __name__ == "__main__":
         os.makedirs(args.embedding_folder_path)
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
+
     transforms = T.Compose([T.ToTensor(), T.Resize([IMAGE_SIZE, IMAGE_SIZE])])
     autoencoder = AE(
         IMAGE_SIZE,
@@ -191,7 +191,6 @@ if __name__ == "__main__":
     key = api_key.read()
     api_key.close()
     os.environ["WANDB_API_KEY"] = key
-
     if "tensor" in DS_NAME:
         images = torch.load(f"{DATA_DIR}/{DS_NAME}/images.pt")
         targets = torch.load(f"{DATA_DIR}/{DS_NAME}/labels.pt")

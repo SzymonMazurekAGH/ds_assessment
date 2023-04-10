@@ -9,12 +9,12 @@
 ## Ilość pamięci przypadającej na jeden rdzeń obliczeniowy (domyślnie 4GB na rdzeń)
 #SBATCH --mem-per-cpu=6GB
 ## Maksymalny czas trwania zlecenia (format HH:MM:SS)
-#SBATCH --time=00:05:00
+#SBATCH --time=01:00:00
 ## Nazwa grantu do rozliczenia zużycia zasobów
 #SBATCH -A plglaoisi23-gpu-a100
 ## Specyfikacja partycji
 #SBATCH --partition plgrid-gpu-a100
-#SBATCH --gpus-per-node=1
+#SBATCH --gpus=1
 ## SBATCH -C memfs
 ## Plik ze standardowym wyjściem
 #SBATCH --output="/net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment/output/out/training.out"
@@ -24,15 +24,27 @@
 module add CUDA/11.7
 conda activate /net/tscratch/people/plgmazurekagh/conda_envs/age_recognition
 cd /net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment
-srun python ae_training_pipeline.py --latent_dim 256 --ds_name MNIST --grayscale --inference 
-# --ds_name FMNIST &  python train_vae.py --ds_name MNIST &
-# python train_vae.py --ds_name CIFAR10 &  python train_vae.py --ds_name pitbull_tensor &
-# python train_vae.py --ds_name expert_tensor &  python train_vae.py --ds_name dog_breeds_tensor
-# python extract_tiny_imagenet.py --n_split 0 & python extract_tiny_imagenet.py --n_split 1 &
-# python extract_tiny_imagenet.py --n_split 2 & python extract_tiny_imagenet.py --n_split 2 &
-# python extract_tiny_imagenet.py --n_split 3 & python extract_tiny_imagenet.py --n_split 4 &
-# python extract_tiny_imagenet.py --n_split 5 & python extract_tiny_imagenet.py --n_split 6 &
-# python extract_tiny_imagenet.py --n_split 7 & python extract_tiny_imagenet.py --n_split 8 &
-# python extract_tiny_imagenet.py --n_split 9 
-#python extract_tiny_imagenet.py 
-#python compute_metrics.py
+
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 256 --ae_scaling_factor 1.0 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 256 --ae_scaling_factor 0.5 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 256 --ae_scaling_factor 0.75 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 128 --ae_scaling_factor 1.0 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 128 --ae_scaling_factor 0.5 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name MNIST  --latent_dim 128 --ae_scaling_factor 0.75 --grayscale --batch_size 256
+
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 256 --ae_scaling_factor 1.0 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 256 --ae_scaling_factor 0.5 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 256 --ae_scaling_factor 0.75 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 128 --ae_scaling_factor 1.0 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 128 --ae_scaling_factor 0.5 --grayscale --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name FMNIST  --latent_dim 128 --ae_scaling_factor 0.75 --grayscale --batch_size 256
+
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 256 --ae_scaling_factor 1.0 --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 256 --ae_scaling_factor 0.5 --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 256 --ae_scaling_factor 0.75 --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 128 --ae_scaling_factor 1.0 --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 128 --ae_scaling_factor 0.5 --batch_size 256
+srun python ae_training_pipeline.py --embed --inference --ds_name CIFAR10  --latent_dim 128 --ae_scaling_factor 0.75 --batch_size 256
+
+
+
