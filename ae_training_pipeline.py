@@ -1,6 +1,7 @@
 import os
 import torch
 import wandb
+import logging
 import pandas as pd
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier
@@ -12,10 +13,17 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from ae import AE
 import clustering_assessment as ca
+import datetime
+import time
+
+logging.basicConfig(filename="logname.log", level=logging.INFO, filemode="a")
+logging.info("Starting")
+
+logger = logging.getLogger()
 
 DEVICE_GPU = torch.device("cuda:0")
 DEVICE_CPU = torch.device("cpu")
-pl.seed_everything(42)
+# pl.seed_everything(42)
 
 
 def train(
@@ -98,17 +106,91 @@ def perform_embedding(model, dataset, device=DEVICE_GPU):
     return embedded_images.cpu(), target.cpu()
 
 
+def extract_balanced_classes_dataset(
+    dataset, n_samples_per_class, max_class_count=20, alternative_n_samples=100
+) -> np.ndarray:
+    """Extracts a balanced subset of the dataset, with n_samples_per_class samples per class.
+    If the dataset has more than max_class_count classes, the number of samples per class is
+    reduced to alternative_n_samples.
+
+    Args:
+        dataset (torch.utils.data.Dataset): Dataset to extract from
+        n_samples_per_class (int): Number of samples per class to extract
+        max_class_count (int, optional): Maximum number of classes to consider. Defaults to 20.
+        alternative_n_samples (int, optional): Number of samples per class to extract if the
+    dataset has more than max_class_count classes. Defaults to 10.
+
+    Returns:
+        chosen_indexes (np.ndarray): Array of indexes of the extracted samples
+    """
+    print(f"Extracting balanced classes, {n_samples_per_class}")
+    logger.log(20, "Starting extraction")
+    _, ds_labels = zip(*dataset)
+    ds_labels = np.array(ds_labels)
+    logger.log(20, f"Dataset labels extracted, shape: {ds_labels.shape[0]} total")
+    unique_classes = np.unique(ds_labels)
+    logger.log(20, unique_classes)
+    for unique_label in unique_classes:
+        label_indexes = np.where(ds_labels == unique_label)[0]
+        random_subsample = np.random.choice(
+            label_indexes,
+            n_samples_per_class
+            if len(unique_classes) < max_class_count
+            else alternative_n_samples,
+            replace=False,
+        )
+        try:
+            chosen_indexes = np.concatenate((chosen_indexes, random_subsample))
+        except:
+            chosen_indexes = random_subsample
+    logger.log(
+        20, f"Balanced classes extracted, shape: {chosen_indexes.shape[0]} total"
+    )
+
+    return chosen_indexes
+
+
+def compute_tree_metrics_raw(dataset, n_samples_extracted, csv_save_path=None) -> None:
+    indexes = extract_balanced_classes_dataset(dataset, n_samples_extracted)
+    logger.log(20, "Starting binary tree metrics computation")
+    # subset = dataset[indexes]
+    subset = torch.utils.data.Subset(dataset, indexes)
+    # x_balanced, y_balanced = subset[:][0], subset[:][1]
+    x_balanced, y_balanced = zip(*subset)
+    x_balanced = torch.stack(x_balanced)
+    # logger.log(20, f"Balanced classes extracted, shape: {x_balanced.shape} total")
+    x_balanced = x_balanced.flatten(start_dim=1).numpy()
+    y_balanced = np.array(y_balanced)
+    # logger.log(20, f"Balanced classes flattened, shape: {x_balanced.shape} total")
+    tree_classifier = DecisionTreeClassifier(random_state=0)
+    tree_classifier.fit(x_balanced, y_balanced)
+    result_dict = {
+        "mean_impurity": float(tree_classifier.tree_.impurity.mean()),
+        "std_impurity": float(tree_classifier.tree_.impurity.std()),
+        "num_leaves": float(tree_classifier.tree_.n_leaves),
+        "max_depth": float(tree_classifier.tree_.max_depth),
+        "capacity": float(tree_classifier.tree_.capacity),
+    }
+    result_dataframe = pd.DataFrame(result_dict, index=[0])
+    result_dataframe.to_csv(csv_save_path, index=False)
+    print(f"Metrics computed and saved to {csv_save_path}")
+
+
 def extract_balanced_classes(features, target, n_samples_per_class):
+    print(f"Extracting balanced classes, {n_samples_per_class}")
     unique_classes = np.unique(target)
-    indexes = []
-    for n, sample_label in enumerate(target):
-        if sum(target[indexes] == sample_label) < n_samples_per_class:
-            indexes.append(n)
-        if sum(
-            np.unique(target[indexes], return_counts=True)[1]
-        ) == n_samples_per_class * len(unique_classes):
-            break
-    return features[indexes], target[indexes]
+    for unique_label in unique_classes:
+        label_indexes = np.where(target == unique_label)[0]
+        random_subsample = np.random.choice(
+            label_indexes,
+            n_samples_per_class,
+            replace=False,
+        )
+        try:
+            chosen_indexes = np.concatenate((chosen_indexes, random_subsample))
+        except:
+            chosen_indexes = random_subsample
+    return features[chosen_indexes], target[chosen_indexes]
 
 
 def compute_tree_metrics_embeddings(
@@ -134,12 +216,32 @@ def compute_tree_metrics_embeddings(
     print(f"Metrics computed and saved to {csv_save_path}")
 
 
+class ImageTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, dirpath, transform=None) -> None:
+        self.images = torch.load(f"{dirpath}/images.pt")
+        self.labels = torch.load(f"{dirpath}/labels.pt")
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, idx) -> tuple:
+        image = self.images[idx]
+        label = self.labels[idx]
+        if self.transform:
+            image = self.transform(image)
+        return image, label
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--data_dir", type=str, default="data/")
     parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
-    parser.add_argument("--csv_folder_path", type=str, default="csv_results/")
+    parser.add_argument(
+        "--csv_folder_path", type=str, default="csv_results_100_per_class/"
+    )
     parser.add_argument("--embedding_folder_path", type=str, default="embeddings/ae/")
+    parser.add_argument("--inference_raw", action="store_true")
     parser.add_argument("--grayscale", action="store_true")
     parser.add_argument("--train", action="store_true")
     parser.add_argument("--inference", action="store_true")
@@ -160,6 +262,7 @@ if __name__ == "__main__":
     TRAIN = args.train
     EMBED = args.embed
     INFERENCE = args.inference
+    INFERENCE_RAW = args.inference_raw
     GRAYSCALE = args.grayscale
     BATCH_SIZE = args.batch_size
     IMAGE_SIZE = args.image_size
@@ -192,10 +295,11 @@ if __name__ == "__main__":
     api_key.close()
     os.environ["WANDB_API_KEY"] = key
     if "tensor" in DS_NAME:
-        images = torch.load(f"{DATA_DIR}/{DS_NAME}/images.pt")
-        targets = torch.load(f"{DATA_DIR}/{DS_NAME}/labels.pt")
-        if EMBED:
-            full_dataset = torch.utils.data.TensorDataset(images, targets)
+        ## deleting the to tensor transform - disguiting, but still, works
+        transforms.transforms.pop(0)
+        full_dataset = ImageTensorDataset(
+            f"{DATA_DIR}/{DS_NAME}/", transform=transforms
+        )
         if TRAIN:
             train_ds, test_ds = torch.utils.data.random_split(full_dataset, [0.8, 0.2])
     else:
@@ -206,7 +310,7 @@ if __name__ == "__main__":
             ## full ds for further inference
             if EMBED:
                 full_dataset = torch.utils.data.ConcatDataset([train_ds, test_ds])
-        elif not TRAIN and EMBED:
+        elif not TRAIN and (EMBED or INFERENCE_RAW):
             full_dataset, _ = ca.load_dataset(
                 DS_NAME, merged=True, root=DATA_DIR, transform=transforms
             )
@@ -252,8 +356,13 @@ if __name__ == "__main__":
                 print("No files found, check filepath or embed the dataset first.")
         images_embedded = images_embedded.cpu().numpy()
         labels = labels.cpu().numpy()
-        print(f"Images embedded shape: {images_embedded.shape}")
-        print(f"Images embedded type: {type(images_embedded)}")
-        print(f"Labels shape: {labels.shape}")
-        print(f"Labels type: {type(labels)}")
-        compute_tree_metrics_embeddings(images_embedded, labels, 200, CSV_PATH)
+
+        compute_tree_metrics_embeddings(images_embedded, labels, 100, CSV_PATH)
+
+    if INFERENCE_RAW:
+        time_start = time.time()
+        print("Computing metrics for raw images...")
+        compute_tree_metrics_raw(
+            full_dataset, 100, os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv")
+        )
+        print(f"Done in {time.time() - time_start} seconds.")
