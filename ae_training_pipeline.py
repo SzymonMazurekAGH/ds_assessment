@@ -15,6 +15,7 @@ from ae import AE
 import clustering_assessment as ca
 import datetime
 import time
+from torch.utils.data.dataset import ConcatDataset
 
 logging.basicConfig(filename="logname.log", level=logging.INFO, filemode="a")
 logging.info("Starting")
@@ -107,7 +108,7 @@ def perform_embedding(model, dataset, device=DEVICE_GPU):
 
 
 def extract_balanced_classes_dataset(
-    dataset, n_samples_per_class, max_class_count=20, alternative_n_samples=100
+    dataset, n_samples_per_class, max_class_count=20, alternative_n_samples=75
 ) -> np.ndarray:
     """Extracts a balanced subset of the dataset, with n_samples_per_class samples per class.
     If the dataset has more than max_class_count classes, the number of samples per class is
@@ -127,7 +128,6 @@ def extract_balanced_classes_dataset(
     logger.log(20, "Starting extraction")
     _, ds_labels = zip(*dataset)
     ds_labels = np.array(ds_labels)
-    logger.log(20, f"Dataset labels extracted, shape: {ds_labels.shape[0]} total")
     unique_classes = np.unique(ds_labels)
     logger.log(20, unique_classes)
     for unique_label in unique_classes:
@@ -143,9 +143,6 @@ def extract_balanced_classes_dataset(
             chosen_indexes = np.concatenate((chosen_indexes, random_subsample))
         except:
             chosen_indexes = random_subsample
-    logger.log(
-        20, f"Balanced classes extracted, shape: {chosen_indexes.shape[0]} total"
-    )
 
     return chosen_indexes
 
@@ -153,15 +150,17 @@ def extract_balanced_classes_dataset(
 def compute_tree_metrics_raw(dataset, n_samples_extracted, csv_save_path=None) -> None:
     indexes = extract_balanced_classes_dataset(dataset, n_samples_extracted)
     logger.log(20, "Starting binary tree metrics computation")
-    # subset = dataset[indexes]
-    subset = torch.utils.data.Subset(dataset, indexes)
-    # x_balanced, y_balanced = subset[:][0], subset[:][1]
-    x_balanced, y_balanced = zip(*subset)
-    x_balanced = torch.stack(x_balanced)
-    # logger.log(20, f"Balanced classes extracted, shape: {x_balanced.shape} total")
+    if isinstance(dataset, ConcatDataset):
+        subset = torch.utils.data.Subset(dataset, indexes)
+        x_balanced, y_balanced = zip(*subset)
+        x_balanced = torch.stack(x_balanced)
+    else:
+        subset = dataset[indexes]
+        x_balanced, y_balanced = subset[:][0], subset[:][1]
+
     x_balanced = x_balanced.flatten(start_dim=1).numpy()
     y_balanced = np.array(y_balanced)
-    # logger.log(20, f"Balanced classes flattened, shape: {x_balanced.shape} total")
+    logger.log(20, f"Balanced classes flattened, shape: {x_balanced.shape} total")
     tree_classifier = DecisionTreeClassifier(random_state=0)
     tree_classifier.fit(x_balanced, y_balanced)
     result_dict = {
@@ -238,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="data/")
     parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
     parser.add_argument(
-        "--csv_folder_path", type=str, default="csv_results_100_per_class/"
+        "--csv_folder_path", type=str, default="csv_results_75_per_class/"
     )
     parser.add_argument("--embedding_folder_path", type=str, default="embeddings/ae/")
     parser.add_argument("--inference_raw", action="store_true")
@@ -357,12 +356,12 @@ if __name__ == "__main__":
         images_embedded = images_embedded.cpu().numpy()
         labels = labels.cpu().numpy()
 
-        compute_tree_metrics_embeddings(images_embedded, labels, 100, CSV_PATH)
+        compute_tree_metrics_embeddings(images_embedded, labels, 75, CSV_PATH)
 
     if INFERENCE_RAW:
         time_start = time.time()
         print("Computing metrics for raw images...")
         compute_tree_metrics_raw(
-            full_dataset, 100, os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv")
+            full_dataset, 75, os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv")
         )
         print(f"Done in {time.time() - time_start} seconds.")

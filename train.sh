@@ -9,7 +9,7 @@
 ## Ilość pamięci przypadającej na jeden rdzeń obliczeniowy (domyślnie 4GB na rdzeń)
 #SBATCH --mem-per-cpu=20GB
 ## Maksymalny czas trwania zlecenia (format HH:MM:SS)
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 ## Nazwa grantu do rozliczenia zużycia zasobów
 #SBATCH -A plglaoisi23-gpu-a100
 ## Specyfikacja partycji
@@ -17,9 +17,9 @@
 #SBATCH --gpus=0
 ## SBATCH -C memfs
 ## Plik ze standardowym wyjściem
-#SBATCH --output="/net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment/output/out/training.out"
+#SBATCH --output="/net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment/output/out/training1.out"
 ## Plik ze standardowym wyjściem błędó0w
-#SBATCH --error="/net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment/output/err/training.err"
+#SBATCH --error="/net/tscratch/people/plgmazurekagh/cyfrovet/dataset_assessment/output/err/training1.err"
 #module add python/3.10
 module add CUDA/11.7
 conda activate /net/tscratch/people/plgmazurekagh/conda_envs/age_recognition
