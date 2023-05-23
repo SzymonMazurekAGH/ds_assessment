@@ -97,7 +97,14 @@ def perform_embedding(model, dataset, device=DEVICE_GPU):
         x, y = batch
         x = x.to(device)
         with torch.no_grad():
-            embedding = model.fc(model.encoder(x))
+            if isinstance(model, AE):
+                embedding = model.fc(model.encoder(x))
+            elif isinstance(model, VAE):
+                enc_out = model.encoder(x)
+                mu = model.fc_mu(enc_out)
+                log_var = model.fc_var(enc_out)
+                _, _, embedding = model.sample(mu, log_var)
+
         try:
             embedded_images = torch.cat([embedded_images, embedding])
             target = torch.cat([target, y])
@@ -240,7 +247,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--csv_folder_path", type=str, default="vae_csv_results_75_per_class/"
     )
-    parser.add_argument("--embedding_folder_path", type=str, default="embeddings/ae/")
+    parser.add_argument("--embedding_folder_path", type=str, default="embeddings/vae/")
     parser.add_argument("--inference_raw", action="store_true")
     parser.add_argument("--grayscale", action="store_true")
     parser.add_argument("--train", action="store_true")
@@ -345,7 +352,10 @@ if __name__ == "__main__":
 
     if EMBED:
         try:
-            trained_model = AE.load_from_checkpoint(CHECKPOINT_PATH).to(DEVICE_GPU)
+            if MODEL_TYPE == "AE":
+                trained_model = AE.load_from_checkpoint(CHECKPOINT_PATH).to(DEVICE_GPU)
+            elif MODEL_TYPE == "VAE":
+                trained_model = VAE.load_from_checkpoint(CHECKPOINT_PATH).to(DEVICE_GPU)
         except FileNotFoundError:
             print("No checkpoint found, check filepath or train the model first.")
 
