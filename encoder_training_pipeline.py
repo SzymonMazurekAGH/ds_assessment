@@ -12,6 +12,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from ae import AE
+from vae import VAE
 import clustering_assessment as ca
 import datetime
 import time
@@ -237,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="data/")
     parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
     parser.add_argument(
-        "--csv_folder_path", type=str, default="csv_results_75_per_class/"
+        "--csv_folder_path", type=str, default="vae_csv_results_75_per_class/"
     )
     parser.add_argument("--embedding_folder_path", type=str, default="embeddings/ae/")
     parser.add_argument("--inference_raw", action="store_true")
@@ -248,8 +249,15 @@ if __name__ == "__main__":
     parser.add_argument("--ds_name", type=str, default="MNIST")
     parser.add_argument("--latent_dim", type=int, default=256)
     parser.add_argument("--image_size", type=int, default=128)
+    parser.add_argument("--vae", action="store_true", help="Use VAE instead of AE")
     parser.add_argument(
-        "--ae_scaling_factor",
+        "--eval_samples_per_class",
+        type=int,
+        default=75,
+        help="Number of samples per class used for binary tree evaluation",
+    )
+    parser.add_argument(
+        "--scaling_factor",
         type=float,
         default=1.0,
         help="Rescale number of parameters in AE by scaling the channels in conv layers",
@@ -267,12 +275,14 @@ if __name__ == "__main__":
     IMAGE_SIZE = args.image_size
     DS_NAME = args.ds_name
     LATENT_DIM = args.latent_dim
-    AE_SCALING_FACTOR = args.ae_scaling_factor
-    EXPERIMENT_NAME = f"ae_{AE_SCALING_FACTOR}_{DS_NAME}_{LATENT_DIM}"
+    SCALING_FACTOR = args.scaling_factor
+    MODEL_TYPE = "VAE" if args.vae else "AE"
+    EXPERIMENT_NAME = f"{MODEL_TYPE}_{SCALING_FACTOR}_{DS_NAME}_{LATENT_DIM}"
     CHECKPOINT_FOLDER = args.checkpoint_folder_path
     CHECKPOINT_PATH = os.path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.ckpt")
     CSV_PATH = os.path.join(args.csv_folder_path, f"{EXPERIMENT_NAME}.csv")
     EMBEDDINGS_FOLDER = args.embedding_folder_path
+    N_SAMPLES_PER_CLASS = args.eval_samples_per_class
     if not os.path.exists(args.checkpoint_folder_path):
         os.makedirs(args.checkpoint_folder_path)
     if not os.path.exists(args.csv_folder_path):
@@ -283,12 +293,20 @@ if __name__ == "__main__":
         os.makedirs(DATA_DIR)
 
     transforms = T.Compose([T.ToTensor(), T.Resize([IMAGE_SIZE, IMAGE_SIZE])])
-    autoencoder = AE(
-        IMAGE_SIZE,
-        latent_dim=LATENT_DIM,
-        ae_size=AE_SCALING_FACTOR,
-        grayscale=GRAYSCALE,
-    )
+    if args.vae:
+        encoding_model = VAE(
+            IMAGE_SIZE,
+            latent_dim=LATENT_DIM,
+            ae_size=SCALING_FACTOR,
+            grayscale=GRAYSCALE,
+        )
+    else:
+        encoding_model = AE(
+            IMAGE_SIZE,
+            latent_dim=LATENT_DIM,
+            ae_size=SCALING_FACTOR,
+            grayscale=GRAYSCALE,
+        )
     api_key = open("/net/tscratch/people/plgmazurekagh/cyfrovet/wandb_api_key.txt", "r")
     key = api_key.read()
     api_key.close()
@@ -320,7 +338,7 @@ if __name__ == "__main__":
             test_ds,
             BATCH_SIZE,
             1000,
-            autoencoder,
+            encoding_model,
             CHECKPOINT_FOLDER,
             EXPERIMENT_NAME,
         )
@@ -356,12 +374,16 @@ if __name__ == "__main__":
         images_embedded = images_embedded.cpu().numpy()
         labels = labels.cpu().numpy()
 
-        compute_tree_metrics_embeddings(images_embedded, labels, 75, CSV_PATH)
+        compute_tree_metrics_embeddings(
+            images_embedded, labels, N_SAMPLES_PER_CLASS, CSV_PATH
+        )
 
     if INFERENCE_RAW:
         time_start = time.time()
         print("Computing metrics for raw images...")
         compute_tree_metrics_raw(
-            full_dataset, 75, os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv")
+            full_dataset,
+            N_SAMPLES_PER_CLASS,
+            os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv"),
         )
         print(f"Done in {time.time() - time_start} seconds.")

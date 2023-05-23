@@ -33,8 +33,10 @@ class VAE(LightningModule):
         kl_coeff: float = 0.1,
         latent_dim: int = 256,
         lr: float = 1e-4,
+        grayscale: bool = False,
+        scaling_factor: int = 1,
         **kwargs,
-    ):
+    ) -> None:
         """
         Args:
             input_height: height of the images
@@ -71,20 +73,28 @@ class VAE(LightningModule):
         }
 
         if enc_type not in valid_encoders:
-            self.encoder = resnet18_encoder(first_conv, maxpool1)
+            self.encoder = resnet18_encoder(first_conv, maxpool1, scaling_factor)
             self.decoder = resnet18_decoder(
-                self.latent_dim, self.input_height, first_conv, maxpool1
+                self.latent_dim, self.input_height, first_conv, maxpool1, scaling_factor
             )
         else:
-            self.encoder = valid_encoders[enc_type]["enc"](first_conv, maxpool1)
+            self.encoder = valid_encoders[enc_type]["enc"](
+                first_conv, maxpool1, scaling_factor
+            )
             self.decoder = valid_encoders[enc_type]["dec"](
-                self.latent_dim, self.input_height, first_conv, maxpool1
+                self.latent_dim, self.input_height, first_conv, maxpool1, scaling_factor
             )
 
         self.fc_mu = nn.Linear(self.enc_out_dim, self.latent_dim)
         self.fc_var = nn.Linear(self.enc_out_dim, self.latent_dim)
-        # self.encoder.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        # self.decoder.conv1 = torch.nn.Conv2d(64, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        if grayscale:
+            self.encoder.conv1 = torch.nn.Conv2d(
+                1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+            )
+            self.decoder.conv1 = torch.nn.Conv2d(
+                64, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+            )
+
     @staticmethod
     def pretrained_weights_available():
         return list(VAE.pretrained_urls.keys())
