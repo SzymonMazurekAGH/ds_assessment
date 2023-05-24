@@ -26,6 +26,71 @@ logger = logging.getLogger()
 DEVICE_GPU = torch.device("cuda:0")
 DEVICE_CPU = torch.device("cpu")
 # pl.seed_everything(42)
+parser = ArgumentParser()
+parser.add_argument("--data_dir", type=str, default="data/")
+parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
+parser.add_argument("--csv_folder_path", type=str, default="csv_results_unbound/")
+parser.add_argument("--embedding_folder_path", type=str, default="embeddings_unbound/")
+parser.add_argument("--inference_raw", action="store_true")
+parser.add_argument("--grayscale", action="store_true")
+parser.add_argument("--train", action="store_true")
+parser.add_argument("--inference", action="store_true")
+parser.add_argument("--embed", action="store_true")
+parser.add_argument("--ds_name", type=str, default="MNIST")
+parser.add_argument("--latent_dim", type=int, default=256)
+parser.add_argument("--image_size", type=int, default=128)
+parser.add_argument("--vae", action="store_true", help="Use VAE instead of AE")
+parser.add_argument(
+    "--eval_samples_per_class",
+    type=int,
+    default=75,
+    help="Number of samples per class used for binary tree evaluation",
+)
+parser.add_argument(
+    "--alternative_samples_per_class",
+    type=int,
+    default=20,
+    help="Number of samples per class used for alternative binary tree evaluation when \
+    the number of classes is too large (bigger than 20 currently)",
+)
+parser.add_argument(
+    "--max_class_count",
+    type=int,
+    default=20,
+    help="Max class count when \
+    sampling for binary tree evaluation. If the number of classes is bigger than this, \
+    alternative_samples_per_class is extracted instead.",
+)
+parser.add_argument(
+    "--scaling_factor",
+    type=float,
+    default=1.0,
+    help="Rescale number of parameters in AE by scaling the channels in conv layers",
+)
+
+parser.add_argument("--batch_size", type=int, default=128)
+args = parser.parse_args()
+
+DATA_DIR = args.data_dir
+TRAIN = args.train
+EMBED = args.embed
+ALTERNATIVE_SAMPLES_PER_CLASS = args.alternative_samples_per_class
+MAX_CLASS_COUNT = args.max_class_count
+INFERENCE = args.inference
+INFERENCE_RAW = args.inference_raw
+GRAYSCALE = args.grayscale
+BATCH_SIZE = args.batch_size
+IMAGE_SIZE = args.image_size
+DS_NAME = args.ds_name
+LATENT_DIM = args.latent_dim
+SCALING_FACTOR = args.scaling_factor
+MODEL_TYPE = "VAE" if args.vae else "AE"
+EXPERIMENT_NAME = f"{MODEL_TYPE}_{SCALING_FACTOR}_{DS_NAME}_{LATENT_DIM}"
+CHECKPOINT_FOLDER = args.checkpoint_folder_path
+CHECKPOINT_PATH = os.path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.ckpt")
+CSV_PATH = os.path.join(args.csv_folder_path, f"{EXPERIMENT_NAME}.csv")
+EMBEDDINGS_FOLDER = args.embedding_folder_path
+N_SAMPLES_PER_CLASS = args.eval_samples_per_class
 
 
 def train(
@@ -116,7 +181,10 @@ def perform_embedding(model, dataset, device=DEVICE_GPU):
 
 
 def extract_balanced_classes_dataset(
-    dataset, n_samples_per_class, max_class_count=20, alternative_n_samples=75
+    dataset,
+    n_samples_per_class,
+    max_class_count=MAX_CLASS_COUNT,
+    alternative_n_samples=ALTERNATIVE_SAMPLES_PER_CLASS,
 ) -> np.ndarray:
     """Extracts a balanced subset of the dataset, with n_samples_per_class samples per class.
     If the dataset has more than max_class_count classes, the number of samples per class is
@@ -241,55 +309,6 @@ class ImageTensorDataset(torch.utils.data.Dataset):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--data_dir", type=str, default="data/")
-    parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
-    parser.add_argument(
-        "--csv_folder_path", type=str, default="vae_csv_results_75_per_class/"
-    )
-    parser.add_argument("--embedding_folder_path", type=str, default="embeddings/vae/")
-    parser.add_argument("--inference_raw", action="store_true")
-    parser.add_argument("--grayscale", action="store_true")
-    parser.add_argument("--train", action="store_true")
-    parser.add_argument("--inference", action="store_true")
-    parser.add_argument("--embed", action="store_true")
-    parser.add_argument("--ds_name", type=str, default="MNIST")
-    parser.add_argument("--latent_dim", type=int, default=256)
-    parser.add_argument("--image_size", type=int, default=128)
-    parser.add_argument("--vae", action="store_true", help="Use VAE instead of AE")
-    parser.add_argument(
-        "--eval_samples_per_class",
-        type=int,
-        default=75,
-        help="Number of samples per class used for binary tree evaluation",
-    )
-    parser.add_argument(
-        "--scaling_factor",
-        type=float,
-        default=1.0,
-        help="Rescale number of parameters in AE by scaling the channels in conv layers",
-    )
-    parser.add_argument("--batch_size", type=int, default=128)
-    args = parser.parse_args()
-
-    DATA_DIR = args.data_dir
-    TRAIN = args.train
-    EMBED = args.embed
-    INFERENCE = args.inference
-    INFERENCE_RAW = args.inference_raw
-    GRAYSCALE = args.grayscale
-    BATCH_SIZE = args.batch_size
-    IMAGE_SIZE = args.image_size
-    DS_NAME = args.ds_name
-    LATENT_DIM = args.latent_dim
-    SCALING_FACTOR = args.scaling_factor
-    MODEL_TYPE = "VAE" if args.vae else "AE"
-    EXPERIMENT_NAME = f"{MODEL_TYPE}_{SCALING_FACTOR}_{DS_NAME}_{LATENT_DIM}"
-    CHECKPOINT_FOLDER = args.checkpoint_folder_path
-    CHECKPOINT_PATH = os.path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.ckpt")
-    CSV_PATH = os.path.join(args.csv_folder_path, f"{EXPERIMENT_NAME}.csv")
-    EMBEDDINGS_FOLDER = args.embedding_folder_path
-    N_SAMPLES_PER_CLASS = args.eval_samples_per_class
     if not os.path.exists(args.checkpoint_folder_path):
         os.makedirs(args.checkpoint_folder_path)
     if not os.path.exists(args.csv_folder_path):
@@ -374,6 +393,7 @@ if __name__ == "__main__":
             print(
                 "No embeddings or labels found found, trying to load them from disk..."
             )
+            print(f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_images_embedded.pt")
             try:
                 images_embedded = torch.load(
                     f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_images_embedded.pt"
