@@ -138,7 +138,7 @@ def train(
         precision=16,
         log_every_n_steps=1,
         max_epochs=epochs,
-        logger=WandbLogger(name=exp_name, project="dataset_assessment", log_model=True),
+        logger=WandbLogger(name=exp_name, project="dataset_assessment", log_model=False),
         callbacks=[early_stop_callback, checkpoint_callback],
         strategy=DDPStrategy(find_unused_parameters=False),
     )

@@ -8,6 +8,7 @@ results/
 *.log
 wandb/
 data/
-checkpoints/
+*checkpoints*/
 *.yml
 csv*/
+time.txt
