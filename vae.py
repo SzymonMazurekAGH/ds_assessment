@@ -1,3 +1,4 @@
+"""Implementation from https://github.com/Lightning-Universe/lightning-bolts/tree/master"""
 import torch
 from pytorch_lightning import LightningModule
 from torch import nn

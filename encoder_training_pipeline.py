@@ -13,30 +13,34 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from ae import AE
 from vae import VAE
-import clustering_assessment as ca
+import utils
 import datetime
 import time
 from torch.utils.data.dataset import ConcatDataset
 
 logging.basicConfig(filename="logname.log", level=logging.INFO, filemode="a")
 logging.info("Starting")
-
 logger = logging.getLogger()
+pl.seed_everything(42)
 
 DEVICE_GPU = torch.device("cuda:0")
 DEVICE_CPU = torch.device("cpu")
-# pl.seed_everything(42)
 parser = ArgumentParser()
 parser.add_argument("--data_dir", type=str, default="data/")
 parser.add_argument("--checkpoint_folder_path", type=str, default="checkpoints/")
-parser.add_argument("--csv_folder_path", type=str, default="csv_results_unbound/")
-parser.add_argument("--embedding_folder_path", type=str, default="embeddings_unbound/")
+parser.add_argument("--csv_folder_path", type=str, default="csv_results/")
+parser.add_argument("--embedding_folder_path", type=str, default="embeddings/")
 parser.add_argument("--inference_raw", action="store_true")
 parser.add_argument("--grayscale", action="store_true")
 parser.add_argument("--train", action="store_true")
 parser.add_argument("--inference", action="store_true")
 parser.add_argument("--embed", action="store_true")
-parser.add_argument("--ds_name", type=str, default="MNIST")
+parser.add_argument(
+    "--ds_name",
+    type=str,
+    default="MNIST",
+    help="Look in utils.py which datasets are available.",
+)
 parser.add_argument("--latent_dim", type=int, default=256)
 parser.add_argument("--image_size", type=int, default=128)
 parser.add_argument("--vae", action="store_true", help="Use VAE instead of AE")
@@ -67,8 +71,8 @@ parser.add_argument(
     default=1.0,
     help="Rescale number of parameters in AE by scaling the channels in conv layers",
 )
-
 parser.add_argument("--batch_size", type=int, default=128)
+
 args = parser.parse_args()
 
 DATA_DIR = args.data_dir
@@ -93,11 +97,41 @@ EMBEDDINGS_FOLDER = args.embedding_folder_path
 N_SAMPLES_PER_CLASS = args.eval_samples_per_class
 
 
+class ImageTensorDataset(torch.utils.data.Dataset):
+    """Dataset wrapping images and labels saved as tensors.
+    (Used due to the nautre of HPC filesystems, users may not need this.)
+    """
+
+    def __init__(self, dirpath, transform=None) -> None:
+        self.images = torch.load(f"{dirpath}/images.pt")
+        self.labels = torch.load(f"{dirpath}/labels.pt")
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, idx) -> tuple:
+        image = self.images[idx]
+        label = self.labels[idx]
+        if self.transform:
+            image = self.transform(image)
+        return image, label
+
+
 def train(
     train_dataset, val_dataset, batch_size, epochs, model, checkpoint_path, exp_name
 ) -> None:
-    # wandb_logger =
-    print(f"Evaluating {exp_name}")
+    """Trains the model on the train_dataset and validates on the val_dataset during training.
+    Args:
+        train_dataset (torch.utils.data.Dataset): Dataset to train on
+        val_dataset (torch.utils.data.Dataset): Dataset to validate on
+        batch_size (int): Batch size
+        epochs (int): Number of epochs
+        model (torch.nn.Module): Model to train
+        checkpoint_path (str): Path to save the checkpoints to
+        exp_name (str): Name of the experiment
+    """
+
     early_stop_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=0.001,
@@ -138,7 +172,9 @@ def train(
         precision=16,
         log_every_n_steps=1,
         max_epochs=epochs,
-        logger=WandbLogger(name=exp_name, project="dataset_assessment", log_model=False),
+        logger=WandbLogger(
+            name=exp_name, project="dataset_assessment", log_model=False
+        ),
         callbacks=[early_stop_callback, checkpoint_callback],
         strategy=DDPStrategy(find_unused_parameters=False),
     )
@@ -148,6 +184,16 @@ def train(
 
 
 def perform_embedding(model, dataset, device=DEVICE_GPU):
+    """Performs embedding of the dataset using the trained model.
+    Args:
+        model (torch.nn.Module): Trained model
+        dataset (torch.utils.data.Dataset): Dataset to embed
+        device (torch.device, optional): Device to use. Defaults to DEVICE_GPU.
+    Returns:
+        embedded_images (torch.Tensor): Tensor of embedded images
+        target (torch.Tensor): Tensor of labels
+    """
+
     model.eval()
     loader = torch.utils.data.DataLoader(
         dataset,
@@ -183,10 +229,10 @@ def perform_embedding(model, dataset, device=DEVICE_GPU):
 def extract_balanced_classes_dataset(
     dataset,
     n_samples_per_class,
-    max_class_count=MAX_CLASS_COUNT,
-    alternative_n_samples=ALTERNATIVE_SAMPLES_PER_CLASS,
+    max_class_count=20,
+    alternative_n_samples=10,
 ) -> np.ndarray:
-    """Extracts a balanced subset of the dataset, with n_samples_per_class samples per class.
+    """Extracts a balanced subset of the torch Dataset, with n_samples_per_class samples per class.
     If the dataset has more than max_class_count classes, the number of samples per class is
     reduced to alternative_n_samples.
 
@@ -200,7 +246,6 @@ def extract_balanced_classes_dataset(
     Returns:
         chosen_indexes (np.ndarray): Array of indexes of the extracted samples
     """
-    print(f"Extracting balanced classes, {n_samples_per_class}")
     logger.log(20, "Starting extraction")
     _, ds_labels = zip(*dataset)
     ds_labels = np.array(ds_labels)
@@ -223,8 +268,54 @@ def extract_balanced_classes_dataset(
     return chosen_indexes
 
 
+def extract_balanced_classes(
+    features, target, n_samples_per_class, max_class_count=20, alternative_n_samples=10
+):
+    """Extracts a balanced subset of the dataset, with n_samples_per_class samples per class.
+    If the dataset has more than max_class_count classes, the number of samples per class is
+    reduced to alternative_n_samples.
+    Args:
+        features (np.ndarray): Array of features
+        target (np.ndarray): Array of labels
+        n_samples_per_class (int): Number of samples per class to extract
+        max_class_count (int, optional): Maximum number of classes to consider. Defaults to 20.
+        alternative_n_samples (int, optional): Number of samples per class to extract if the
+    Returns:
+        result_features (np.ndarray): Array of features of the extracted samples
+        result_target (np.ndarray): Array of labels of the extracted samples
+    """
+    unique_classes = np.unique(target)
+    for unique_label in unique_classes:
+        label_indexes = np.where(target == unique_label)[0]
+        random_subsample = np.random.choice(
+            label_indexes,
+            n_samples_per_class
+            if len(unique_classes) < max_class_count
+            else alternative_n_samples,
+            replace=False,
+        )
+        try:
+            chosen_indexes = np.concatenate((chosen_indexes, random_subsample))
+        except:
+            chosen_indexes = random_subsample
+    result_features = features[chosen_indexes]
+    result_target = target[chosen_indexes]
+
+    return result_features, result_target
+
+
 def compute_tree_metrics_raw(dataset, n_samples_extracted, csv_save_path=None) -> None:
-    indexes = extract_balanced_classes_dataset(dataset, n_samples_extracted)
+    """Computes the metrics of a binary tree trained on the subset of the RAW dataset
+    and saves them to csv.
+    Args:
+        dataset (torch.utils.data.Dataset): Dataset to extract from
+        n_samples_extracted (int): Number of samples per class to extract
+        csv_save_path (str, optional): Path to save the csv to. Defaults to None.
+    """
+
+    indexes = extract_balanced_classes_dataset(
+        dataset, n_samples_extracted, MAX_CLASS_COUNT, ALTERNATIVE_SAMPLES_PER_CLASS
+    )
     logger.log(20, "Starting binary tree metrics computation")
     if isinstance(dataset, ConcatDataset):
         subset = torch.utils.data.Subset(dataset, indexes)
@@ -236,7 +327,6 @@ def compute_tree_metrics_raw(dataset, n_samples_extracted, csv_save_path=None) -
 
     x_balanced = x_balanced.flatten(start_dim=1).numpy()
     y_balanced = np.array(y_balanced)
-    logger.log(20, f"Balanced classes flattened, shape: {x_balanced.shape} total")
     tree_classifier = DecisionTreeClassifier(random_state=0)
     tree_classifier.fit(x_balanced, y_balanced)
     result_dict = {
@@ -251,31 +341,27 @@ def compute_tree_metrics_raw(dataset, n_samples_extracted, csv_save_path=None) -
     print(f"Metrics computed and saved to {csv_save_path}")
 
 
-def extract_balanced_classes(features, target, n_samples_per_class):
-    print(f"Extracting balanced classes, {n_samples_per_class}")
-    unique_classes = np.unique(target)
-    for unique_label in unique_classes:
-        label_indexes = np.where(target == unique_label)[0]
-        random_subsample = np.random.choice(
-            label_indexes,
-            n_samples_per_class,
-            replace=False,
-        )
-        try:
-            chosen_indexes = np.concatenate((chosen_indexes, random_subsample))
-        except:
-            chosen_indexes = random_subsample
-    return features[chosen_indexes], target[chosen_indexes]
-
-
 def compute_tree_metrics_embeddings(
     features,
     target,
     n_samples_extracted,
     csv_save_path=None,
 ) -> None:
+    """Computes the metrics of a binary tree trained on the subset of the EMBEDDED dataset
+    and saves them to csv.
+    Args:
+        features (np.ndarray): Array of features
+        target (np.ndarray): Array of labels
+        n_samples_extracted (int): Number of samples per class to extract
+        csv_save_path (str, optional): Path to save the csv to. Defaults to None.
+    """
+
     x_balanced, y_balanced = extract_balanced_classes(
-        features, target, n_samples_extracted
+        features,
+        target,
+        n_samples_extracted,
+        MAX_CLASS_COUNT,
+        ALTERNATIVE_SAMPLES_PER_CLASS,
     )
     tree_classifier = DecisionTreeClassifier(random_state=0)
     tree_classifier.fit(x_balanced, y_balanced)
@@ -289,23 +375,6 @@ def compute_tree_metrics_embeddings(
     result_dataframe = pd.DataFrame(result_dict, index=[0])
     result_dataframe.to_csv(csv_save_path, index=False)
     print(f"Metrics computed and saved to {csv_save_path}")
-
-
-class ImageTensorDataset(torch.utils.data.Dataset):
-    def __init__(self, dirpath, transform=None) -> None:
-        self.images = torch.load(f"{dirpath}/images.pt")
-        self.labels = torch.load(f"{dirpath}/labels.pt")
-        self.transform = transform
-
-    def __len__(self) -> int:
-        return len(self.images)
-
-    def __getitem__(self, idx) -> tuple:
-        image = self.images[idx]
-        label = self.labels[idx]
-        if self.transform:
-            image = self.transform(image)
-        return image, label
 
 
 if __name__ == "__main__":
@@ -333,28 +402,28 @@ if __name__ == "__main__":
             ae_size=SCALING_FACTOR,
             grayscale=GRAYSCALE,
         )
-    api_key = open("/net/tscratch/people/plgmazurekagh/cyfrovet/wandb_api_key.txt", "r")
+    api_key = open("your_wandb_api_key.txt", "r")
     key = api_key.read()
     api_key.close()
     os.environ["WANDB_API_KEY"] = key
     if "tensor" in DS_NAME:
-        ## deleting the to tensor transform - disguiting, but still, works
+        ## deleting the to tensor transform
         transforms.transforms.pop(0)
         full_dataset = ImageTensorDataset(
-            f"{DATA_DIR}/{DS_NAME}/", transform=transforms
+            os.path.join(DATA_DIR, DS_NAME), transform=transforms
         )
         if TRAIN:
             train_ds, test_ds = torch.utils.data.random_split(full_dataset, [0.8, 0.2])
     else:
         if TRAIN:
-            train_ds, test_ds, _ = ca.load_dataset(
+            train_ds, test_ds, _ = utils.load_dataset(
                 DS_NAME, merged=False, root=DATA_DIR, transform=transforms
             )
             ## full ds for further inference
             if EMBED:
                 full_dataset = torch.utils.data.ConcatDataset([train_ds, test_ds])
         elif not TRAIN and (EMBED or INFERENCE_RAW):
-            full_dataset, _ = ca.load_dataset(
+            full_dataset, _ = utils.load_dataset(
                 DS_NAME, merged=True, root=DATA_DIR, transform=transforms
             )
 
@@ -382,9 +451,12 @@ if __name__ == "__main__":
             trained_model, full_dataset, DEVICE_GPU
         )
         torch.save(
-            images_embedded, f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_images_embedded.pt"
+            images_embedded,
+            os.path.join(EMBEDDINGS_FOLDER, f"{EXPERIMENT_NAME}_images_embedded.pt"),
         )
-        torch.save(labels, f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_labels.pt")
+        torch.save(
+            labels, os.path.join(EMBEDDINGS_FOLDER, f"{EXPERIMENT_NAME}_labels.pt")
+        )
 
     if INFERENCE:
         try:
@@ -393,12 +465,15 @@ if __name__ == "__main__":
             print(
                 "No embeddings or labels found found, trying to load them from disk..."
             )
-            print(f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_images_embedded.pt")
             try:
                 images_embedded = torch.load(
-                    f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_images_embedded.pt"
+                    os.path.join(
+                        EMBEDDINGS_FOLDER, f"{EXPERIMENT_NAME}_images_embedded.pt"
+                    )
                 )
-                labels = torch.load(f"{EMBEDDINGS_FOLDER}/{EXPERIMENT_NAME}_labels.pt")
+                labels = torch.load(
+                    os.path.join(EMBEDDINGS_FOLDER, f"{EXPERIMENT_NAME}_labels.pt")
+                )
             except FileNotFoundError:
                 print("No files found, check filepath or embed the dataset first.")
         images_embedded = images_embedded.cpu().numpy()
@@ -409,11 +484,8 @@ if __name__ == "__main__":
         )
 
     if INFERENCE_RAW:
-        time_start = time.time()
-        print("Computing metrics for raw images...")
         compute_tree_metrics_raw(
             full_dataset,
             N_SAMPLES_PER_CLASS,
             os.path.join(args.csv_folder_path, f"{DS_NAME}_raw.csv"),
         )
-        print(f"Done in {time.time() - time_start} seconds.")
