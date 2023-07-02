@@ -8,3 +8,14 @@ Notes on usage:
   - In case user would like to load the data in classical ImageFolder please implement your own pipeline and modify the encoder_training_pipeline.py script
 
 For more information about the code and data, as well as access to the datasets - please contact via s.mazurek@cyfronet.pl
+
+```
+@misc{mazurek2023assessing,
+      title={Assessing Dataset Quality Through Decision Tree Characteristics in Autoencoder-Processed Spaces}, 
+      author={Szymon Mazurek and Maciej Wielgosz},
+      year={2023},
+      eprint={2306.15392},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+```
